@@ -1,49 +1,81 @@
 require 'rails_helper'
 
-RSpec.describe User, type: :model do
-  it 'has a password field' do
-    expect(User.new).to respond_to(:password)
-  end
+RSpec.describe "Users", type: :request do
 
-  it 'has a username field' do
-    expect(User.new).to respond_to(:username)
-  end
+  describe 'POST /signup' do
+    context 'with matching password confirmation' do
+      let!(:user_params) { { name: 'Steven', password: 'un1verse', password_confirmation: 'un1verse' } }
+      
+      it 'creates a new user' do
+        expect { post '/signup', params: user_params }.to change(User, :count).by(1)
+      end
 
-  it 'has a password confirmation field' do
-    expect(User.new).to respond_to(:password_confirmation)
-  end
+      it 'saves the password as password_digest to allow authentication' do
+        post '/signup', params: user_params
 
-  it 'is valid if password and password_confirmation match' do
-    user = User.new
-    user.password = 'foo'
-    user.password_confirmation = 'foo'
-    expect(user.valid?).to be(true)
-  end
+        expect(User.last.authenticate(user_params[:password])).to eq(User.last)
+      end
+      
+      it 'saves the user id in the session' do
+        post '/signup', params: user_params
 
-  it 'is valid if password is set and password_confirmation is nil' do
-     user = User.new
-     user.password = 'foo'
-     expect(user.valid?).to be(true)
-  end
+        expect(session[:user_id]).to eq(User.last.id)
+      end
+      
+      it 'returns the user as JSON' do
+        post '/signup', params: user_params
 
-  it "is invalid if password and password_confirmation are both non-nil and don't match" do
-    user = User.new
-    user.password = 'foo'
-    user.password_confirmation = 'fo0'
-    expect(user.valid?).to be(false)
-  end
+        expect(response.body).to include_json({
+          id: User.last.id,
+          username: User.last.username
+        })
+      end
 
-  describe 'authenticate' do
-    it 'returns the user if credentials match' do
-      user = User.new
-      user.password = 'foo'
-      expect(user.authenticate('foo')).to eq(user)
     end
 
-    it "returns false if credentials don't match" do
-      user = User.new
-      user.password = 'foo'
-      expect(user.authenticate('fo0')).to be(false)
+    context 'with no matching password confirmation' do
+      let!(:user_params) { { name: 'Steven', password: 'un1verse', password_confirmation: 'wrong' } }
+
+      it 'does not save the user' do
+        expect { post '/signup' }.not_to change(User, :count)
+      end
+
+      it 'returns a 422 unprocessable entity response' do
+        post '/signup', params: user_params
+
+        expect(response).to have_http_status(:unprocessable_entity)
+      end
+      
     end
   end
+
+  describe 'GET /me' do
+    let!(:user1) { User.create(username: 'steven', password: 'un1verse') }
+    let!(:user2) { User.create(username: 'Connie', password: 'M4heswaran') }
+
+    it 'returns the first user when the first user is logged in' do
+      post '/login', params: { username: user1.username, password: user1.password }
+      get '/me'
+
+      expect(response.body).to include_json({ 
+        id: user1.id, username: user1.username
+      })
+    end
+
+    it 'returns the second user when the second user is logged in' do
+      post '/login', params: { username: user2.username, password: user2.password }
+      get '/me'
+
+      expect(response.body).to include_json({ 
+        id: user2.id, username: user2.username
+      })
+    end
+
+    it 'returns a 401 unauthorized response when no user is logged in' do
+      get '/me'
+
+      expect(response).to have_http_status(:unauthorized)
+    end
+  end
+  
 end
